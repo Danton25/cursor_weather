@@ -1,6 +1,6 @@
 import React, { useState, memo, useEffect, useRef } from 'react';
 import { Box, Typography, IconButton, Paper, CircularProgress } from '@mui/material';
-import { MapContainer, TileLayer, Marker, Popup, useMap, useMapEvents } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, useMap, useMapEvents, ZoomControl } from 'react-leaflet';
 import AddIcon from '@mui/icons-material/Add';
 import RemoveIcon from '@mui/icons-material/Remove';
 import 'leaflet/dist/leaflet.css';
@@ -168,123 +168,53 @@ function HeatmapLayer() {
   ) : null;
 }
 
-function ZoomControl({ onZoomIn, onZoomOut }) {
-  const map = useMap();
-
-  const handleZoomIn = () => {
-    map.zoomIn();
-    if (onZoomIn) onZoomIn();
-  };
-
-  const handleZoomOut = () => {
-    map.zoomOut();
-    if (onZoomOut) onZoomOut();
-  };
-
-  return (
-    <Box sx={{ 
-      position: 'absolute', 
-      right: 20, 
-      top: 20, 
-      zIndex: 1000,
-      backgroundColor: 'white',
-      borderRadius: 1,
-      boxShadow: '0px 2px 4px rgba(0,0,0,0.2)',
-      display: 'flex',
-      flexDirection: 'column',
-      padding: '4px',
-      '& .MuiIconButton-root': {
-        padding: '4px',
-        width: '28px',
-        height: '28px',
-        minWidth: '28px',
-        '& svg': {
-          fontSize: '20px'
-        }
-      }
-    }}>
-      <IconButton onClick={handleZoomIn} size="small">
-        <AddIcon fontSize="small" />
-      </IconButton>
-      <IconButton onClick={handleZoomOut} size="small">
-        <RemoveIcon fontSize="small" />
-      </IconButton>
-    </Box>
-  );
-}
-
-function LocationMarker({ onLocationSelect }) {
-  const [position, setPosition] = useState(null);
+function LocationMarker({ position, onLocationSelect }) {
   const [locationName, setLocationName] = useState('');
   const [loading, setLoading] = useState(false);
-  const [userLocale, setUserLocale] = useState('en');
   const markerRef = useRef(null);
   const mapRef = useRef(null);
 
-  useEffect(() => {
-    setUserLocale(getUserLocale());
-  }, []);
-
   const handleClick = async (e) => {
-    const newPos = e.latlng;
-    setPosition(newPos);
+    const { lat, lng } = e.latlng;
+    onLocationSelect({ lat, lng });
     setLoading(true);
-    setLocationName('');
-    
     try {
       const response = await axios.get(
-        `https://api.openweathermap.org/geo/1.0/reverse?lat=${newPos.lat}&lon=${newPos.lng}&limit=1&appid=${process.env.REACT_APP_OPENWEATHER_API_KEY}&lang=${userLocale}`
+        `https://api.openweathermap.org/data/2.5/weather?lat=${lat}&lon=${lng}&appid=${process.env.REACT_APP_OPENWEATHER_API_KEY}`
       );
-      
-      if (response.data && response.data.length > 0) {
-        const location = response.data[0];
-        const name = location.local_names?.[userLocale] || location.local_names?.['en'] || location.name;
-        setLocationName(name);
-        if (onLocationSelect) {
-          onLocationSelect(name);
-        }
-      }
+      setLocationName(response.data.name);
     } catch (error) {
-      console.error('Error getting location name:', error);
-      setLocationName('Location not found');
+      console.error('Error fetching location name:', error);
+      setLocationName('Unknown Location');
     } finally {
       setLoading(false);
     }
   };
 
-  const map = useMapEvents({
-    click: handleClick
-  });
-
   useEffect(() => {
-    mapRef.current = map;
-    return () => {
-      if (mapRef.current) {
+    if (mapRef.current) {
+      mapRef.current.on('click', handleClick);
+      return () => {
         mapRef.current.off('click', handleClick);
-      }
-    };
-  }, [map]);
+      };
+    }
+  }, [handleClick]);
 
-  // Update marker when position changes
   useEffect(() => {
-    if (markerRef.current) {
-      markerRef.current.remove();
-    }
-
     if (position && mapRef.current) {
-      markerRef.current = L.marker(position)
-        .bindPopup(
-          `<div>
-            <div style="font-weight: bold">${loading ? 'Loading...' : locationName || 'Location Selected'}</div>
-            <div>${loading ? 'Getting weather data...' : 'Weather data loaded'}</div>
-          </div>`
-        )
-        .addTo(mapRef.current);
-    }
-
-    return () => {
       if (markerRef.current) {
-        markerRef.current.remove();
+        mapRef.current.removeLayer(markerRef.current);
+      }
+      markerRef.current = L.marker(position).addTo(mapRef.current);
+      markerRef.current.bindPopup(
+        `<div style="text-align: center;">
+          ${loading ? '<div>Loading...</div>' : locationName}
+        </div>`
+      );
+    }
+    return () => {
+      if (markerRef.current && mapRef.current) {
+        mapRef.current.removeLayer(markerRef.current);
       }
     };
   }, [position, loading, locationName]);
@@ -316,7 +246,7 @@ const WorldMap = memo(({ onLocationSelect }) => {
           url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager_labels_under/{z}/{x}/{y}.png"
         />
         <ZoomControl />
-        <LocationMarker onLocationSelect={onLocationSelect} />
+        <LocationMarker position={null} onLocationSelect={onLocationSelect} />
         <HeatmapLayer />
       </MapContainer>
 
